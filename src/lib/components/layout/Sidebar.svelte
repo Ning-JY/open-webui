@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import Sortable from 'sortablejs';
@@ -71,12 +71,13 @@
 	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import Note from '../icons/Note.svelte';
+	import Cloud from '../icons/Cloud.svelte';
 	import Code from '../icons/Code.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
+	const DEFAULT_PINNED_ITEMS = ['notes', 'drive', 'workspace'];
 
 	let scrollTop = 0;
 
@@ -113,7 +114,9 @@
 					($config?.features?.enable_notes ?? false) &&
 					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
 				);
-			case 'workspace':
+			case 'drive':
+            return $user !== undefined && $user !== null;
+        case 'workspace':
 				return (
 					$user?.role === 'admin' ||
 					$user?.permissions?.workspace?.models ||
@@ -141,6 +144,7 @@
 	const getMenuItemMeta = (id) => {
 		const items = {
 			notes: { label: 'Notes', href: '/notes', iconType: 'note' },
+            drive: { label: '文件管理', href: '/drive', iconType: 'drive' },
 			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
 			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
@@ -876,6 +880,8 @@
 									<div class=" self-center flex items-center justify-center size-9">
 										{#if itemId === 'notes'}
 											<Note className="size-4.5" />
+										{:else if itemId === 'drive'}
+											<Cloud className="size-4.5" />
 										{:else if itemId === 'workspace'}
 											<svg
 												xmlns="http://www.w3.org/2000/svg"
@@ -1123,6 +1129,8 @@
 										<div class="self-center">
 											{#if itemId === 'notes'}
 												<Note className="size-4.5" strokeWidth="2" />
+											{:else if itemId === 'drive'}
+												<Cloud className="size-4.5" strokeWidth="2" />
 											{:else if itemId === 'workspace'}
 												<svg
 													xmlns="http://www.w3.org/2000/svg"

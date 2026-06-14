@@ -106,6 +106,7 @@ from open_webui.routers import (
     terminals,
     automations,
     calendar,
+    drive,
 )
 
 from open_webui.routers.retrieval import (
@@ -622,12 +623,12 @@ class SPAStaticFiles(StaticFiles):
 
 if LOG_FORMAT != 'json':
     print(rf"""
- ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
-██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
-██║   ██║██████╔╝█████╗  ██╔██╗ ██║    ██║ █╗ ██║█████╗  ██████╔╝██║   ██║██║
-██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║    ██║███╗██║██╔══╝  ██╔══██╗██║   ██║██║
-╚██████╔╝██║     ███████╗██║ ╚████║    ╚███╔███╔╝███████╗██████╔╝╚██████╔╝██║
- ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝     ╚══╝╚══╝ ╚══════╝╚═════╝  ╚═════╝ ╚═╝
+ ██████�██████�███████╗███╗   ██�   ██�   ██╗███████╗██████╗ ██�  ██╗██╗
+██╔═══██╗██╔══██╗██╔════╝████╗  ██�   ██�   ██║██╔════╝██╔══██╗██║   ██║██║
+██�  ██║██████╔╝█████� ██╔██╗ ██�   ██�█╗ ██║█████� ██████╔╝██�  ██║██║
+██�  ██║██╔═══╝ ██╔══╝  ██║╚██╗██║    ██║███╗██║██╔══╝  ██╔══██╗██�  ██║██║
+╚██████╔╝██║     ███████╗██�╚████║    ╚███╔███╔╝███████╗██████╔╝╚██████╔╝██║
+ ╚═════�╚═�    ╚══════╝╚═� ╚═══�    ╚══╝╚══╝ ╚══════╝╚═════� ╚═════�╚═�
 
 
 v{VERSION} - building the best AI user interface.
@@ -927,7 +928,7 @@ app.state.config.ENABLE_USER_STATUS = ENABLE_USER_STATUS
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
 
-# Migrate legacy access_control → access_grants on boot
+# Migrate legacy access_control �access_grants on boot
 from open_webui.utils.access_control import migrate_access_control
 
 connections = app.state.config.TOOL_SERVER_CONNECTIONS
@@ -1393,7 +1394,7 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
 # `BaseHTTPMiddleware` / `@app.middleware('http')` versions wrapped the
 # downstream app in an anyio task group whose cancel scope cancelled
 # in-flight DB calls (and any other awaits) on client disconnect /
-# response completion — which surfaced as noisy SQLAlchemy
+# response completion �which surfaced as noisy SQLAlchemy
 # `terminate_force_close` tracebacks under aiosqlite and as random
 # CancelledError storms across the request path. See
 # `open_webui.utils.asgi_middleware` for the rationale.
@@ -1431,6 +1432,7 @@ app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
+app.include_router(drive.router, prefix='/api/v1/drive', tags=['drive'])
 
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
@@ -1745,9 +1747,9 @@ async def chat_completion(
             reasoning_tags = model_info_params.get('reasoning_tags')
 
         # parent_id signals intent:
-        #   null   → new chat (root message, no parent)
-        #   value  → follow-up (user message's parentId = prev assistant)
-        #   absent → legacy caller, no chat management
+        #   null   �new chat (root message, no parent)
+        #   value  �follow-up (user message's parentId = prev assistant)
+        #   absent �legacy caller, no chat management
         is_new_chat = 'parent_id' in form_data and form_data['parent_id'] is None and not form_data.get('chat_id')
         parent_id = form_data.pop('parent_id', None)
         form_data.pop('new_chat', None)  # Legacy field
@@ -1867,7 +1869,7 @@ async def chat_completion(
                             log.debug(f'Error inserting chat files: {e}')
                             pass
                 else:
-                    # Existing chat — verify ownership
+                    # Existing chat �verify ownership
                     if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
@@ -1893,7 +1895,7 @@ async def chat_completion(
                             user_message,
                         )
 
-                        # Link grandparent → user message (childrenIds)
+                        # Link grandparent �user message (childrenIds)
                         grandparent_id = user_message.get('parentId')
                         if grandparent_id:
                             grandparent = await Chats.get_message_by_id_and_message_id(chat_id, grandparent_id)
@@ -1927,7 +1929,7 @@ async def chat_completion(
                     user_message_id = metadata.get('user_message_id')
                     all_assistant_ids = [assistant_id for assistant_id in message_ids.values() if assistant_id]
 
-                    # Link user message → all assistant messages (childrenIds)
+                    # Link user message �all assistant messages (childrenIds)
                     if user_message_id and all_assistant_ids:
                         existing_user_message = await Chats.get_message_by_id_and_message_id(chat_id, user_message_id)
                         if existing_user_message:
@@ -2039,7 +2041,7 @@ async def chat_completion(
                 except Exception:
                     pass
             else:
-                # No chat_id/message_id → legacy/direct API path with no
+                # No chat_id/message_id �legacy/direct API path with no
                 # WebSocket error channel.  We must surface the error as
                 # a proper HTTP response; without this the function would
                 # return None which FastAPI serializes as null.  #23924
@@ -2052,7 +2054,7 @@ async def chat_completion(
             # failure doesn't skip the rest.
             #
             # NOTE: asyncio.wait_for() / asyncio.shield() must NOT be used
-            # here — they create new asyncio Tasks, which violate anyio
+            # here �they create new asyncio Tasks, which violate anyio
             # cancel-scope task-ownership rules when the MCPClient's
             # exit_stack contains anyio transport resources (streamable_http).
             # Exiting those cancel scopes from the wrong task raises
@@ -2678,7 +2680,7 @@ async def register_client(request, client_id: str) -> bool:
                 'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
             },
         }
-        # Re-assign the full list to trigger AppConfig.__setattr__ → PersistentConfig.save()
+        # Re-assign the full list to trigger AppConfig.__setattr__ �PersistentConfig.save()
         # (in-place list mutation via list[idx] = ... does not trigger __setattr__)
         request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
     except Exception as e:
