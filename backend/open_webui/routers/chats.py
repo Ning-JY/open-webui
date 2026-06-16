@@ -12,6 +12,7 @@ from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
+from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import (
     AggregateChatStats,
     ChatBody,
@@ -192,6 +193,39 @@ async def get_session_user_chat_usage_stats(
     except Exception as e:
         log.exception(e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT())
+
+
+
+
+############################
+# GetUserTokenUsage
+############################
+
+
+@router.get('/stats/token-usage')
+async def get_user_token_usage(
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Get token usage statistics for the current user."""
+    try:
+        token_usage = await ChatMessages.get_token_usage_by_user(db=db)
+        user_usage = token_usage.get(user.id, {})
+        
+        return {
+            'input_tokens': user_usage.get('input_tokens', 0),
+            'output_tokens': user_usage.get('output_tokens', 0),
+            'total_tokens': user_usage.get('total_tokens', 0),
+            'message_count': user_usage.get('message_count', 0),
+        }
+    except Exception as e:
+        log.exception(e)
+        return {
+            'input_tokens': 0,
+            'output_tokens': 0,
+            'total_tokens': 0,
+            'message_count': 0,
+        }
 
 
 ############################

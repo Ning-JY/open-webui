@@ -95,7 +95,7 @@ docker run -d -p 3000:8080 \
 | 变量 | 说明 | 示例 |
 |---|---|---|
 | `OLLAMA_BASE_URL` | Ollama 服务地址 | `http://192.168.1.101:11434` |
-| `OPENAI_API_BASE_URL` | OpenAI 兼容 API 地址 | `https://api.openai.com/v1` |
+| `OPENAI_API_BASE_URL` | OpenAI 兼容 API 地址 | `http://192.168.1.100:18789/v1` |
 | `OPENAI_API_KEY` | API 密钥 | `sk-xxx` |
 | `WEBUI_AUTH` | 关闭登录验证（单用户模式） | `False` |
 | `WEBUI_SECRET_KEY` | 会话密钥（防登出） | `openssl rand -hex 32` 生成 |
@@ -119,8 +119,8 @@ services:
     volumes:
       - open-webui:/app/backend/data
     environment:
-      - OPENAI_API_BASE_URL=https://你的API地址/v1
-      - OPENAI_API_KEY=sk-你的密钥
+      - OPENAI_API_BASE_URL=http://192.168.1.100:18789/v1
+      - OPENAI_API_KEY=d335a038fcc0306c0b161892043dc1b6981f36ca82a01a62
       - WEBUI_SECRET_KEY=你的会话密钥
       - ENABLE_SIGNUP=True
       - DEFAULT_MODELS=gpt-4o
@@ -141,17 +141,27 @@ docker compose up -d
 在项目根目录创建 `.env` 文件：
 
 ```env
+# ============ API 配置 ============
+OPENAI_API_BASE_URL=http://192.168.1.100:18789/v1
+OPENAI_API_KEY=d335a038fcc0306c0b161892043dc1b6981f36ca82a01a62
+
 # ============ 基础配置 ============
+WEBUI_NAME=我的AI助手
+WEBUI_URL=http://192.168.1.100:3000
+WEBUI_SECRET_KEY=2090a273257d91e2a8453930e7f44d058513fc401be789b32fe13af78fd6e065
 DATA_DIR=./data
-WEBUI_SECRET_KEY=随便写一个长字符串用于加密会话
+DEFAULT_LOCALE=zh-CN
 
-# ============ OpenAI 兼容 API 配置 ============
-OPENAI_API_BASE_URL=https://你的API地址/v1
-OPENAI_API_KEY=sk-你的API密钥
-
-# ============ 其他常用配置 ============
+# ============ 用户管理 ============
 ENABLE_SIGNUP=True
-DEFAULT_MODELS=gpt-4o
+DEFAULT_USER_ROLE=user
+
+# ============ 功能开关 ============
+ENABLE_CHANNELS=True
+ENABLE_NOTES=True
+ENABLE_MEMORIES=True
+ENABLE_CALENDAR=True
+ENABLE_AUTOMATIONS=True
 CORS_ALLOW_ORIGIN=*
 ```
 
@@ -166,7 +176,7 @@ CORS_ALLOW_ORIGIN=*
 ```powershell
 cd ~/Desktop   # 或你想放代码的目录
 
-git clone https://github.com/你的用户名/open-webui.git
+git clone https://github.com/Ning-JY/open-webui.git
 cd open-webui
 
 # 添加官方仓库为上游
@@ -354,7 +364,7 @@ git push origin main
 ssh user@192.168.1.100
 
 cd /opt
-git clone https://github.com/你的用户名/open-webui.git
+git clone https://github.com/Ning-JY/open-webui.git
 cd open-webui
 
 # 创建 .env 文件（配置环境变量）
@@ -433,6 +443,133 @@ Copy-Item -Recurse -Force build backend\open_webui\frontend
 # 重启服务
 open-webui serve --port 8081
 ```
+
+### 7.5 Token 用量统计配置
+
+Open WebUI 支持统计每个账号的 token 用量，包括 OpenAI 兼容 API（如 OpenClaw）。
+
+#### 开启步骤
+
+1. 进入 **Admin Panel → Workspace → Models**
+2. 编辑你使用的模型（如 `openclaw`）
+3. 在 **Capabilities** 中勾选 **Usage**
+4. 保存
+
+开启后，每条消息右下角会显示 token 消耗量。
+
+#### 前提条件
+
+你的 API 需要在响应中返回 `usage` 字段。可以通过以下命令验证：
+
+```bash
+curl http://192.168.1.100:18789/v1/chat/completions \
+  -H "Authorization: Bearer d335a038fcc0306c0b161892043dc1b6981f36ca82a01a62" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openclaw","messages":[{"role":"user","content":"hello"}],"stream":false}'
+```
+
+如果响应中包含 `usage` 字段（如 `prompt_tokens`、`completion_tokens`），则支持统计。
+
+#### 管理员查看全局用量
+
+进入 **Admin Panel → Analytics**，可以查看所有用户的 token 使用统计。
+
+### 7.6 模型访问控制（可选）
+
+如果需要限制用户只能使用管理员配置的模型：
+
+#### 方法 1：通过 Admin Panel 设置
+
+1. 进入 **Admin Panel → Workspace → Models**
+2. 编辑 `openclaw` 模型
+3. 找到 **Access Control** 或 **Visibility** 选项
+4. 设置为只有管理员可见或指定用户/组
+5. 保存
+
+#### 方法 2：通过环境变量限制
+
+在 `.env` 文件中添加：
+
+```env
+# 禁止用户绕过模型访问控制
+BYPASS_MODEL_ACCESS_CONTROL=False
+```
+
+这样只有管理员明确授权的模型才会显示在聊天界面的模型选择器中。
+
+#### 说明
+
+- **Connections**（Admin Panel → Settings → Connections）= 配置 API 连接
+- **Workspace → Models** = 自定义模型配置（可选，不创建也能用）
+- **聊天界面模型选择器** = 实际选择模型的地方
+
+### 7.7 登录方式自定义（可选）
+
+默认情况下，Open WebUI 使用邮箱登录。如果想让用户输入用户名即可登录（系统自动补全邮箱后缀），需要修改前端代码。
+
+#### 修改内容
+
+文件：`src/routes/auth/+page.svelte`
+
+在 `signInHandler` 和 `signUpHandler` 函数中，自动为没有 `@` 的输入添加 `@local.com` 后缀：
+
+```javascript
+// 登录时
+const loginEmail = email.includes('@') ? email : `${email}@local.com`;
+
+// 注册时
+const signupEmail = email.includes('@') ? email : `${email}@local.com`;
+```
+
+#### 使用方式
+
+- 用户输入 `zhangsan` → 系统转为 `zhangsan@local.com`
+- 用户输入 `test@gmail.com` → 保持原样 `test@gmail.com`
+
+#### 注意事项
+
+- 此修改仅影响前端，后端无需改动
+- 合并官方更新时可能需要手动解决冲突
+- 建议在独立分支上进行此修改
+
+### 7.8 用户用量面板（自定义功能）
+
+为普通用户提供独立的 Token 用量统计页面。
+
+#### 功能说明
+
+- 显示总聊天数、输入/输出/总 Token 数
+- 按聊天显示详细用量
+- 支持刷新数据
+
+#### 文件修改
+
+1. 新建页面：`src/routes/(app)/usage/+page.svelte`
+2. 修改侧边栏：`src/lib/components/layout/Sidebar.svelte`
+   - 添加 usage 菜单项
+   - 添加用量图标
+   - 加入默认固定菜单
+
+#### 访问路径
+
+登录后，侧边栏点击 **用量统计** 菜单即可访问。
+
+### 7.9 登录页面汉化（自定义功能）
+
+将登录页面的 "Email" 标签改为 "用户名"，配合自动邮箱后缀功能使用。
+
+#### 文件修改
+
+文件：`src/routes/auth/+page.svelte`
+
+修改内容：
+- 标签：`Email` → `用户名`
+- 输入框类型：`email` → `text`
+- 占位符：`Enter Your Email` → `请输入用户名`
+
+#### 注意事项
+
+此修改仅影响前端显示，后端登录逻辑不变（仍使用邮箱格式）。
 
 ## 常见问题
 

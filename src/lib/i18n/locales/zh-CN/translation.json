@@ -2348,5 +2348,21 @@
 	"Your usage stats have been successfully synced.": "已成功同步您的使用统计数据。",
 	"YouTube": "YouTube",
 	"Youtube Language": "Youtube 语言",
-	"Youtube Proxy URL": "Youtube 代理地址"
+	"Youtube Proxy URL": "Youtube 代理地址",
+	"Token Usage Statistics": "Token 用量统计",
+	"Total Chats": "总聊天数",
+	"Input Tokens": "输入 Token",
+	"Output Tokens": "输出 Token",
+	"Total Tokens": "总 Token",
+	"Chat Details": "聊天详情",
+	"Title": "标题",
+	"Input": "输入",
+	"Output": "输出",
+	"Total": "总计",
+	"No usage data available": "暂无用量数据",
+	"Refresh": "刷新",
+	"Loading...": "加载中...",
+	"文件管理": "文件管理",
+	"用量统计": "用量统计"
+
 }

@@ -69,7 +69,9 @@
 	};
 
 	const signInHandler = async () => {
-		const sessionUser = await userSignIn(email, password).catch((error) => {
+		// Auto-append email suffix if not already an email
+		const loginEmail = email.includes('@') ? email : `${email}@local.com`;
+		const sessionUser = await userSignIn(loginEmail, password).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -78,6 +80,8 @@
 	};
 
 	const signUpHandler = async () => {
+		// Auto-append email suffix if not already an email
+		const signupEmail = email.includes('@') ? email : `${email}@local.com`;
 		if ($config?.features?.enable_signup_password_confirmation) {
 			if (password !== confirmPassword) {
 				toast.error($i18n.t('Passwords do not match.'));
@@ -85,7 +89,7 @@
 			}
 		}
 
-		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
+		const sessionUser = await userSignUp(name, signupEmail, password, generateInitialsImage(name)).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;
@@ -336,18 +340,21 @@
 										{:else}
 											<div class="mb-2">
 												<label for="email" class="text-sm font-medium text-left mb-1 block"
-													>{$i18n.t('Email')}</label
+													>用户名</label
 												>
-												<input
-													bind:value={email}
-													type="email"
-													id="email"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
-													autocomplete="email"
-													name="email"
-													placeholder={$i18n.t('Enter Your Email')}
-													required
-												/>
+												<div class="my-0.5 flex items-center w-full text-sm outline-hidden bg-transparent border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition">
+													<input
+														bind:value={email}
+														type="text"
+														id="email"
+														class="flex-1 bg-transparent outline-hidden min-w-0"
+														autocomplete="username"
+														name="email"
+														placeholder='请输入用户名'
+														required
+													/>
+													<span class="text-gray-400 dark:text-gray-500 select-none shrink-0">@local.com</span>
+												</div>
 											</div>
 										{/if}
 

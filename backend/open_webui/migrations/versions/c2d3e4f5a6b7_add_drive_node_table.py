@@ -14,7 +14,7 @@ from open_webui.migrations.util import get_existing_tables
 
 
 revision: str = 'c2d3e4f5a6b7'
-down_revision: str | None = 'a0b1c2d3e4f5'
+down_revision: str | None = '461111b60977'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
