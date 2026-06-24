@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import Sortable from 'sortablejs';
@@ -77,7 +77,7 @@
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'drive', 'usage', 'workspace'];
+	const DEFAULT_PINNED_ITEMS = ['notes', 'drive', 'file-space', 'usage', 'workspace'];
 
 	let scrollTop = 0;
 
@@ -105,7 +105,15 @@
 
 	let newFolderId = null;
 
-	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+	$: pinnedItems = (() => {
+		const items = $settings?.pinnedMenuItems?.length
+			? $settings.pinnedMenuItems
+			: DEFAULT_PINNED_ITEMS;
+		if (!items.includes('file-space')) {
+			return ['file-space', ...items];
+		}
+		return items;
+	})();
 
 	const isMenuItemVisible = (id) => {
 		switch (id) {
@@ -115,6 +123,8 @@
 					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
 				);
 			case 'drive':
+            return $user !== undefined && $user !== null;
+        case 'file-space':
             return $user !== undefined && $user !== null;
         case 'usage':
 				return $user !== undefined && $user !== null;
@@ -148,6 +158,7 @@
 		const items = {
 			notes: { label: 'Notes', href: '/notes', iconType: 'note' },
             drive: { label: '文件管理', href: '/drive', iconType: 'drive' },
+            'file-space': { label: '文件空间', href: '/file-space', iconType: 'file-space' },
             usage: { label: '用量统计', href: '/usage', iconType: 'usage' },
 			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
@@ -886,6 +897,10 @@
 											<Note className="size-4.5" />
 										{:else if itemId === 'drive'}
 											<Cloud className="size-4.5" />
+										{:else if itemId === 'file-space'}
+											<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4.5">
+												<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+											</svg>
 										{:else if itemId === 'usage'}
 											<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4.5">
 												<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
@@ -1141,6 +1156,10 @@
 												<Note className="size-4.5" strokeWidth="2" />
 											{:else if itemId === 'drive'}
 												<Cloud className="size-4.5" strokeWidth="2" />
+											{:else if itemId === 'file-space'}
+												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-4.5">
+													<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+												</svg>
 											{:else if itemId === 'usage'}
 												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-4.5">
 													<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />

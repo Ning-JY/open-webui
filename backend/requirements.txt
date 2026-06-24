@@ -159,3 +159,5 @@ opentelemetry-instrumentation-logging==0.61b0
 opentelemetry-instrumentation-httpx==0.61b0
 opentelemetry-instrumentation-aiohttp-client==0.61b0
 opentelemetry-instrumentation-system-metrics==0.61b0
+
+websockets>=12.0

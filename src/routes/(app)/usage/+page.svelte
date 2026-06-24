@@ -1,6 +1,7 @@
-﻿<script lang="ts">
+<script lang="ts">
 	import { getContext, onMount } from 'svelte';
 	import { mobile, showSidebar, user } from '$lib/stores';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	const i18n = getContext<any>('i18n');
 
@@ -139,9 +140,9 @@
 							<tr class="border-b border-gray-100 dark:border-gray-850 text-gray-500">
 								<th class="text-left px-4 py-2">{$i18n.t('Title')}</th>
 								<th class="text-left px-4 py-2">{$i18n.t('Model')}</th>
-								<th class="text-right px-4 py-2">{$i18n.t('Input')}</th>
-								<th class="text-right px-4 py-2">{$i18n.t('Output')}</th>
-								<th class="text-right px-4 py-2">{$i18n.t('Total')}</th>
+								<th class="text-right px-4 py-2">{$i18n.t('Messages')}</th>
+								<th class="text-right px-4 py-2">{$i18n.t('Avg Response')}</th>
+								<th class="text-right px-4 py-2">{$i18n.t('Updated')}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -150,8 +151,8 @@
 									<td class="px-4 py-2 max-w-[200px] truncate">{stat.title || '-'}</td>
 									<td class="px-4 py-2 text-gray-500">{Object.keys(stat.models || {}).join(', ') || '-'}</td>
 									<td class="px-4 py-2 text-right text-gray-500">{stat.message_count || 0}</td>
+									<td class="px-4 py-2 text-right text-gray-500">{stat.average_response_time ? (stat.average_response_time / 1000).toFixed(1) + 's' : '-'}</td>
 									<td class="px-4 py-2 text-right text-gray-500">{formatDate(stat.updated_at)}</td>
-									<td class="px-4 py-2 text-right font-medium">{formatNumber(stat.total_tokens || 0)}</td>
 								</tr>
 							{/each}
 						</tbody>
