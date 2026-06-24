@@ -6,6 +6,7 @@ import os
 import time
 import uuid
 from collections import defaultdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
 from open_webui.internal.db import Base, get_async_db_context
@@ -311,74 +312,7 @@ async def openclaw_cli(*args: str) -> dict | list | None:
         return {'error': str(e)}
 
 
-def _extract_files_from_transcript(transcript: str) -> list[dict]:
-    """Extract file paths from transcript text.
 
-    Looks for:
-    - canvas:// links
-    - write/edit tool results with file paths
-    - file paths in code blocks
-    """
-    import re
-
-    files = []
-    seen = set()
-
-    # Pattern 1: canvas:// protocol links
-    for match in re.finditer(r'canvas://([^\s\)"\']+)', transcript):
-        path = match.group(1)
-        if path not in seen:
-            seen.add(path)
-            filename = path.split('/')[-1]
-            files.append({
-                'filename': filename,
-                'file_path': f'openclaw://canvas/{path}',
-            })
-
-    # Pattern 2: workspace file paths (e.g., /workspace/agent/file.ext)
-    for match in re.finditer(r'(?:/workspace/[^\s\)"\']+?\.\w{1,10})', transcript):
-        path = match.group(0)
-        if path not in seen:
-            seen.add(path)
-            filename = path.split('/')[-1]
-            files.append({
-                'filename': filename,
-                'file_path': f'openclaw://{path}',
-            })
-
-    # Pattern 3: relative file paths after write/edit mentions
-    for match in re.finditer(r'(?:wrote|created|saved|written to|edit(?:ed)?)\s+(?:file\s+)?[`"\']?([^\s`"\']+\.\w{1,10})', transcript, re.IGNORECASE):
-        path = match.group(1)
-        if path not in seen and not path.startswith('http'):
-            seen.add(path)
-            filename = path.split('/')[-1]
-            files.append({
-                'filename': filename,
-                'file_path': f'openclaw://{path}',
-            })
-
-    return files
-
-
-@router.get('/openclaw/sessions')
-async def list_openclaw_sessions(
-    user=Depends(get_verified_user),
-):
-    """List OpenClaw sessions via CLI."""
-    result = await openclaw_cli('sessions', '--all-agents')
-    if isinstance(result, dict) and 'error' in result:
-        return result
-    return result or {'sessions': []}
-
-
-@router.get('/openclaw/transcripts/{session_selector:path}')
-async def get_openclaw_transcript(
-    session_selector: str,
-    user=Depends(get_verified_user),
-):
-    """Get OpenClaw transcript via CLI."""
-    result = await openclaw_cli('transcripts', 'show', session_selector)
-    return result or {'error': 'Transcript not found'}
 
 
 @router.post('/openclaw/sync')
@@ -386,84 +320,73 @@ async def sync_openclaw_artifacts(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Sync OpenClaw files into file space via CLI.
+    """Sync OpenClaw workspace files into file space.
 
-    Flow:
-    1. List all sessions via `openclaw sessions --all-agents --json`
-    2. For each session, get transcript via `openclaw transcripts show --json`
-    3. Extract file paths from transcript content
-    4. Register files in file_space DB
+    Scans:
+    1. ~/.openclaw/workspace/ - agent workspace files
+    2. ~/.openclaw/workspace/canvas/ - canvas-generated files
     """
-    # Step 1: Get all sessions
-    sessions_result = await openclaw_cli('sessions', '--all-agents')
-    if isinstance(sessions_result, dict) and 'error' in sessions_result:
-        return sessions_result
+    workspace_dir = Path(OPENCLAW_STATE_DIR) / 'workspace'
+    canvas_dir = workspace_dir / 'canvas'
 
-    sessions = sessions_result.get('sessions', []) if isinstance(sessions_result, dict) else []
-    if not sessions:
-        return {'synced': 0, 'message': 'No sessions found'}
-
-    # Step 2: Get transcripts list
-    transcripts_result = await openclaw_cli('transcripts', 'list')
-    if isinstance(transcripts_result, dict) and 'error' in transcripts_result:
-        return transcripts_result
-
-    transcript_list = []
-    if isinstance(transcripts_result, list):
-        transcript_list = transcripts_result
-    elif isinstance(transcripts_result, dict):
-        transcript_list = transcripts_result.get('transcripts', [])
-
-    # Step 3: Process each transcript to extract files
     synced = 0
-    for entry in transcript_list:
-        selector = entry.get('selector', '')
-        title = entry.get('title', selector)
 
-        if not selector:
-            continue
-
-        # Get transcript content
-        transcript_result = await openclaw_cli('transcripts', 'show', selector)
-        if isinstance(transcript_result, dict) and 'error' in transcript_result:
-            continue
-
-        summary = ''
-        if isinstance(transcript_result, dict):
-            summary = transcript_result.get('summary', '')
-
-        if not summary:
-            continue
-
-        # Extract file paths from transcript
-        extracted_files = _extract_files_from_transcript(summary)
-
-        for file_info in extracted_files:
-            filename = file_info['filename']
-            file_path = file_info['file_path']
-
-            # Check if already exists
-            existing = await FileSpace.get_files(
-                user_id=user.id,
-                session_id=selector,
-                db=db,
-            )
-            if any(f.filename == filename for f in existing):
+    # Scan workspace directory (excluding canvas subfolder and dotfiles)
+    if workspace_dir.exists():
+        for item in workspace_dir.iterdir():
+            if item.name.startswith('.'):
                 continue
+            if item.name == 'canvas':
+                continue
+            if item.is_file():
+                synced += await _register_workspace_file(user.id, item, 'workspace', db)
 
-            file_type = detect_file_type(filename)
-            form = FileSpaceForm(
-                session_id=selector,
-                conversation_title=f'OpenClaw - {title}',
-                filename=filename,
-                file_path=file_path,
-                file_size=0,
-                mime_type=None,
-                file_type=file_type,
-            )
-            await FileSpace.insert(user.id, form, db=db)
-            synced += 1
-            log.info(f'Synced file from transcript: {filename} (session: {selector})')
+    # Scan canvas directory
+    if canvas_dir.exists():
+        for item in canvas_dir.rglob('*'):
+            if item.is_file() and not item.name.startswith('.'):
+                synced += await _register_workspace_file(user.id, item, 'canvas', db)
 
     return {'synced': synced}
+
+
+async def _register_workspace_file(
+    user_id: str,
+    file_path: Path,
+    source: str,
+    db: AsyncSession,
+) -> int:
+    """Register a single workspace file in file_space DB. Returns 1 if new, 0 if exists."""
+    filename = file_path.name
+
+    # Get file size
+    try:
+        file_size = file_path.stat().st_size
+    except OSError:
+        file_size = 0
+
+    # Build relative path for display
+    if source == 'canvas':
+        rel_path = f'canvas/{file_path.relative_to(Path(OPENCLAW_STATE_DIR) / "workspace" / "canvas")}'
+    else:
+        rel_path = filename
+
+    # Check if already exists by filename + user
+    existing = await FileSpace.get_files(user_id=user_id, db=db)
+    if any(f.filename == filename and f.file_path and rel_path in f.file_path for f in existing):
+        return 0
+
+    file_type = detect_file_type(filename)
+    form = FileSpaceForm(
+        session_id=f'openclaw-{source}',
+        conversation_title=f'OpenClaw {source.title()}',
+        filename=filename,
+        file_path=f'openclaw://{source}/{rel_path}',
+        file_size=file_size,
+        mime_type=None,
+        file_type=file_type,
+    )
+    await FileSpace.insert(user_id, form, db=db)
+    log.info(f'Synced workspace file: {filename} (source: {source}, size: {file_size})')
+    return 1
 
