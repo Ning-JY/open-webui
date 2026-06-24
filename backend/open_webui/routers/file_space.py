@@ -23,48 +23,7 @@ router = APIRouter()
 
 @router.on_event('startup')
 async def file_space_startup():
-    if os.getenv('OPENCLAW_WS_URL'):
-        start_openclaw_poll()
-
-    from open_webui.utils.openclaw_ws import openclaw_ws_client
-
-    async def _track_openclaw_file(session_key, tool_name, file_path, tool_result, user_id=None):
-        try:
-            from open_webui.internal.db import get_async_db_context
-
-            filename = file_path.split('/')[-1] if file_path else None
-            if not filename:
-                return
-
-            file_type = detect_file_type(filename)
-            file_size = tool_result.get('size', 0) or len(tool_result.get('content', ''))
-
-            owner = user_id or 'openclaw'
-
-            async with get_async_db_context() as db:
-                existing = await FileSpace.get_files(
-                    user_id=owner,
-                    session_id=session_key,
-                    db=db,
-                )
-                if not any(f.filename == filename for f in existing):
-                    form = FileSpaceForm(
-                        session_id=session_key,
-                        conversation_title=f'OpenClaw Agent - {session_key}',
-                        filename=filename,
-                        file_path=f'openclaw://workspace/{file_path}',
-                        file_size=file_size,
-                        mime_type=None,
-                        file_type=file_type,
-                    )
-                    await FileSpace.insert(owner, form, db=db)
-                    log.info(f'Tracked OpenClaw file: {filename} (session: {session_key}, user: {owner})')
-        except Exception as e:
-            log.error(f'Error tracking OpenClaw file: {e}')
-
-    openclaw_ws_client.on_tool_event(_track_openclaw_file)
-    asyncio.create_task(openclaw_ws_client.connect())
-    log.info('OpenClaw WebSocket subscriber started')
+    log.info('File space module loaded (CLI-based OpenClaw integration)')
 
 
 # --- Database Model ---
@@ -311,227 +270,115 @@ async def delete_all_files(
 
 
 # ---------------------------------------------------------------------------
-# OpenClaw Integration
+# OpenClaw Integration (CLI-based)
 # ---------------------------------------------------------------------------
 
-OPENCLAW_WS_URL = os.getenv('OPENCLAW_WS_URL', 'ws://localhost:18789')
-OPENCLAW_TOKEN = os.getenv('OPENCLAW_TOKEN', '')
+OPENCLAW_STATE_DIR = os.getenv('OPENCLAW_STATE_DIR', os.path.expanduser('~/.openclaw'))
 OPENCLAW_POLL_INTERVAL = int(os.getenv('OPENCLAW_POLL_INTERVAL', '60'))  # seconds
-_openclaw_synced_ids: set[str] = set()
-_openclaw_poll_task_started = False
 
 
-async def _openclaw_poll_loop():
-    """Background task: poll OpenClaw for new artifacts and sync them."""
-    global _openclaw_synced_ids
+async def openclaw_cli(*args: str) -> dict | list | None:
+    """Run an openclaw CLI command and return parsed JSON output."""
+    import json as _json
 
-    while True:
-        try:
-            from open_webui.utils.openclaw_ws import openclaw_ws_client
+    cmd = ['openclaw'] + list(args) + ['--json']
+    log.debug(f'Running: {" ".join(cmd)}')
 
-            result = await openclaw_rpc('artifacts.list', {})
-            if 'error' not in result:
-                artifacts = result if isinstance(result, list) else result.get('artifacts', [])
-                for art in artifacts:
-                    art_id = art.get('id', '')
-                    if art_id and art_id not in _openclaw_synced_ids:
-                        _openclaw_synced_ids.add(art_id)
-                        filename = art.get('name', art.get('filename', art_id))
-                        file_size = art.get('size', 0)
-                        mime_type = art.get('mimeType', art.get('contentType'))
-                        session_key = art.get('sessionKey', art.get('sessionId'))
-                        file_type = detect_file_type(filename, mime_type)
-
-                        owner = openclaw_ws_client.get_user_for_session(session_key) or 'openclaw'
-
-                        from open_webui.internal.db import get_async_db_context
-                        async with get_async_db_context() as db:
-                            form = FileSpaceForm(
-                                session_id=session_key,
-                                conversation_title=f'OpenClaw - {session_key or "workspace"}',
-                                filename=filename,
-                                file_path=f'openclaw://{art_id}',
-                                file_size=file_size,
-                                mime_type=mime_type,
-                                file_type=file_type,
-                            )
-                            existing = await FileSpace.get_files(
-                                user_id=owner,
-                                session_id=session_key,
-                                db=db,
-                            )
-                            if not any(f.filename == filename for f in existing):
-                                await FileSpace.insert(owner, form, db=db)
-                                log.info(f'Synced new artifact: {filename} (user: {owner})')
-        except Exception as e:
-            log.debug(f'OpenClaw poll error: {e}')
-
-        await asyncio.sleep(OPENCLAW_POLL_INTERVAL)
-
-
-def start_openclaw_poll():
-    """Start the background polling task (call once at startup)."""
-    global _openclaw_poll_task_started
-    if _openclaw_poll_task_started:
-        return
-    _openclaw_poll_task_started = True
-    import asyncio
     try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(_openclaw_poll_loop())
-        log.info(f'OpenClaw poll started (interval={OPENCLAW_POLL_INTERVAL}s)')
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode('utf-8', errors='replace').strip()
+            log.error(f'openclaw CLI error: {error_msg}')
+            return {'error': error_msg}
+
+        output = stdout.decode('utf-8', errors='replace').strip()
+        if not output:
+            return None
+
+        return _json.loads(output)
+    except FileNotFoundError:
+        return {'error': 'openclaw CLI not found. Install OpenClaw first.'}
+    except asyncio.TimeoutError:
+        return {'error': 'openclaw CLI timed out'}
     except Exception as e:
-        log.warning(f'Failed to start OpenClaw poll: {e}')
-
-
-async def openclaw_rpc(method: str, params: dict = None) -> dict:
-    """Send an RPC call to OpenClaw Gateway via WebSocket."""
-    import json
-    import uuid
-
-    try:
-        import websockets
-    except ImportError:
-        return {'error': 'websockets package not installed. Run: pip install websockets'}
-
-    extra_headers = {}
-    if OPENCLAW_TOKEN:
-        extra_headers['Authorization'] = f'Bearer {OPENCLAW_TOKEN}'
-
-    try:
-        async with websockets.connect(OPENCLAW_WS_URL, additional_headers=extra_headers) as ws:
-            # Wait for optional connect.challenge event
-            first_msg = json.loads(await ws.recv())
-            if first_msg.get('type') == 'event' and first_msg.get('event') == 'connect.challenge':
-                pass  # challenge received, proceed with connect
-
-            # Send connect handshake (OpenClaw Gateway protocol)
-            connect_id = f'connect-{uuid.uuid4().hex[:8]}'
-            connect_msg = {
-                'type': 'req',
-                'id': connect_id,
-                'method': 'connect',
-                'params': {
-                    'minProtocol': 3,
-                    'maxProtocol': 4,
-                    'client': {
-                        'id': 'open-webui',
-                        'version': '1.0.0',
-                        'platform': 'linux',
-                        'mode': 'operator'
-                    },
-                    'role': 'operator',
-                    'scopes': ['operator.read'],
-                    'auth': {'token': OPENCLAW_TOKEN} if OPENCLAW_TOKEN else {}
-                }
-            }
-            await ws.send(json.dumps(connect_msg))
-
-            # Read responses until we get the connect response
-            connect_ok = False
-            for _ in range(10):
-                resp = json.loads(await ws.recv())
-                if resp.get('id') == connect_id:
-                    if resp.get('ok'):
-                        connect_ok = True
-                    break
-
-            if not connect_ok:
-                return {'error': 'OpenClaw connect failed'}
-
-            # Send RPC request
-            rpc_id = f'rpc-{uuid.uuid4().hex[:8]}'
-            payload = {'type': 'req', 'id': rpc_id, 'method': method, 'params': params or {}}
-            await ws.send(json.dumps(payload))
-
-            # Read responses until we get our RPC response
-            for _ in range(10):
-                resp = json.loads(await ws.recv())
-                if resp.get('id') == rpc_id:
-                    if resp.get('ok'):
-                        return resp.get('payload', {})
-                    else:
-                        return {'error': resp.get('error', 'Unknown error')}
-
-            return {'error': 'No response from OpenClaw'}
-    except Exception as e:
-        log.error(f'OpenClaw RPC error: {e}')
+        log.error(f'openclaw CLI error: {e}')
         return {'error': str(e)}
 
 
-@router.get('/openclaw/artifacts')
-async def list_openclaw_artifacts(
-    session_key: str | None = Query(None),
+def _extract_files_from_transcript(transcript: str) -> list[dict]:
+    """Extract file paths from transcript text.
+
+    Looks for:
+    - canvas:// links
+    - write/edit tool results with file paths
+    - file paths in code blocks
+    """
+    import re
+
+    files = []
+    seen = set()
+
+    # Pattern 1: canvas:// protocol links
+    for match in re.finditer(r'canvas://([^\s\)"\']+)', transcript):
+        path = match.group(1)
+        if path not in seen:
+            seen.add(path)
+            filename = path.split('/')[-1]
+            files.append({
+                'filename': filename,
+                'file_path': f'openclaw://canvas/{path}',
+            })
+
+    # Pattern 2: workspace file paths (e.g., /workspace/agent/file.ext)
+    for match in re.finditer(r'(?:/workspace/[^\s\)"\']+?\.\w{1,10})', transcript):
+        path = match.group(0)
+        if path not in seen:
+            seen.add(path)
+            filename = path.split('/')[-1]
+            files.append({
+                'filename': filename,
+                'file_path': f'openclaw://{path}',
+            })
+
+    # Pattern 3: relative file paths after write/edit mentions
+    for match in re.finditer(r'(?:wrote|created|saved|written to|edit(?:ed)?)\s+(?:file\s+)?[`"\']?([^\s`"\']+\.\w{1,10})', transcript, re.IGNORECASE):
+        path = match.group(1)
+        if path not in seen and not path.startswith('http'):
+            seen.add(path)
+            filename = path.split('/')[-1]
+            files.append({
+                'filename': filename,
+                'file_path': f'openclaw://{path}',
+            })
+
+    return files
+
+
+@router.get('/openclaw/sessions')
+async def list_openclaw_sessions(
     user=Depends(get_verified_user),
 ):
-    """List artifacts from OpenClaw Gateway."""
-    params = {}
-    if session_key:
-        params['sessionKey'] = session_key
-    return await openclaw_rpc('artifacts.list', params)
-
-
-@router.get('/openclaw/artifacts/{artifact_id}')
-async def get_openclaw_artifact(
-    artifact_id: str,
-    user=Depends(get_verified_user),
-):
-    """Get artifact details from OpenClaw Gateway."""
-    return await openclaw_rpc('artifacts.get', {'id': artifact_id})
-
-
-@router.get('/openclaw/artifacts/{artifact_id}/download')
-async def download_openclaw_artifact(
-    artifact_id: str,
-    user=Depends(get_verified_user),
-):
-    """Download artifact content from OpenClaw Gateway."""
-    result = await openclaw_rpc('artifacts.get', {'id': artifact_id})
-    if 'error' in result:
+    """List OpenClaw sessions via CLI."""
+    result = await openclaw_cli('sessions', '--all-agents')
+    if isinstance(result, dict) and 'error' in result:
         return result
-
-    filename = result.get('name', result.get('filename', artifact_id))
-    content = result.get('content', '')
-    content_type = result.get('mimeType', result.get('contentType', 'application/octet-stream'))
-
-    if isinstance(content, str) and content.startswith('data:'):
-        import base64
-        content_type, encoded = content.split(',', 1)
-        content = base64.b64decode(encoded)
-    elif isinstance(content, str):
-        content = content.encode('utf-8')
-
-    from fastapi.responses import Response
-    return Response(
-        content=content,
-        media_type=content_type,
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
-    )
+    return result or {'sessions': []}
 
 
-@router.get('/openclaw/workspace')
-async def list_openclaw_workspace(
-    agent_id: str | None = Query(None),
+@router.get('/openclaw/transcripts/{session_selector:path}')
+async def get_openclaw_transcript(
+    session_selector: str,
     user=Depends(get_verified_user),
 ):
-    """List files in OpenClaw agent workspace."""
-    params = {}
-    if agent_id:
-        params['agentId'] = agent_id
-    return await openclaw_rpc('agents.files.list', params)
-
-
-@router.get('/openclaw/workspace/file')
-async def get_openclaw_workspace_file(
-    path: str = Query(...),
-    agent_id: str | None = Query(None),
-    user=Depends(get_verified_user),
-):
-    """Read a file from OpenClaw agent workspace."""
-    params = {'path': path}
-    if agent_id:
-        params['agentId'] = agent_id
-    return await openclaw_rpc('agents.files.get', params)
+    """Get OpenClaw transcript via CLI."""
+    result = await openclaw_cli('transcripts', 'show', session_selector)
+    return result or {'error': 'Transcript not found'}
 
 
 @router.post('/openclaw/sync')
@@ -539,39 +386,84 @@ async def sync_openclaw_artifacts(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Sync OpenClaw artifacts into file space."""
-    from open_webui.utils.openclaw_ws import openclaw_ws_client
+    """Sync OpenClaw files into file space via CLI.
 
-    result = await openclaw_rpc('artifacts.list', {})
-    if 'error' in result:
-        return result
+    Flow:
+    1. List all sessions via `openclaw sessions --all-agents --json`
+    2. For each session, get transcript via `openclaw transcripts show --json`
+    3. Extract file paths from transcript content
+    4. Register files in file_space DB
+    """
+    # Step 1: Get all sessions
+    sessions_result = await openclaw_cli('sessions', '--all-agents')
+    if isinstance(sessions_result, dict) and 'error' in sessions_result:
+        return sessions_result
 
-    artifacts = result if isinstance(result, list) else result.get('artifacts', [])
+    sessions = sessions_result.get('sessions', []) if isinstance(sessions_result, dict) else []
+    if not sessions:
+        return {'synced': 0, 'message': 'No sessions found'}
+
+    # Step 2: Get transcripts list
+    transcripts_result = await openclaw_cli('transcripts', 'list')
+    if isinstance(transcripts_result, dict) and 'error' in transcripts_result:
+        return transcripts_result
+
+    transcript_list = []
+    if isinstance(transcripts_result, list):
+        transcript_list = transcripts_result
+    elif isinstance(transcripts_result, dict):
+        transcript_list = transcripts_result.get('transcripts', [])
+
+    # Step 3: Process each transcript to extract files
     synced = 0
+    for entry in transcript_list:
+        selector = entry.get('selector', '')
+        title = entry.get('title', selector)
 
-    for art in artifacts:
-        art_id = art.get('id', '')
-        filename = art.get('name', art.get('filename', art_id))
-        file_size = art.get('size', 0)
-        mime_type = art.get('mimeType', art.get('contentType'))
-        session_key = art.get('sessionKey', art.get('sessionId'))
+        if not selector:
+            continue
 
-        if session_key:
-            openclaw_ws_client.register_session_user(session_key, user.id)
+        # Get transcript content
+        transcript_result = await openclaw_cli('transcripts', 'show', selector)
+        if isinstance(transcript_result, dict) and 'error' in transcript_result:
+            continue
 
-        file_type = detect_file_type(filename, mime_type)
+        summary = ''
+        if isinstance(transcript_result, dict):
+            summary = transcript_result.get('summary', '')
 
-        form = FileSpaceForm(
-            session_id=session_key,
-            conversation_title=f'OpenClaw - {session_key or "workspace"}',
-            filename=filename,
-            file_path=f'openclaw://{art_id}',
-            file_size=file_size,
-            mime_type=mime_type,
-            file_type=file_type,
-        )
-        await FileSpace.insert(user.id, form, db=db)
-        synced += 1
+        if not summary:
+            continue
+
+        # Extract file paths from transcript
+        extracted_files = _extract_files_from_transcript(summary)
+
+        for file_info in extracted_files:
+            filename = file_info['filename']
+            file_path = file_info['file_path']
+
+            # Check if already exists
+            existing = await FileSpace.get_files(
+                user_id=user.id,
+                session_id=selector,
+                db=db,
+            )
+            if any(f.filename == filename for f in existing):
+                continue
+
+            file_type = detect_file_type(filename)
+            form = FileSpaceForm(
+                session_id=selector,
+                conversation_title=f'OpenClaw - {title}',
+                filename=filename,
+                file_path=file_path,
+                file_size=0,
+                mime_type=None,
+                file_type=file_type,
+            )
+            await FileSpace.insert(user.id, form, db=db)
+            synced += 1
+            log.info(f'Synced file from transcript: {filename} (session: {selector})')
 
     return {'synced': synced}
 
