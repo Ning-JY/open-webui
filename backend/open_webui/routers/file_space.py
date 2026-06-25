@@ -24,7 +24,42 @@ router = APIRouter()
 
 @router.on_event('startup')
 async def file_space_startup():
-    log.info('File space module loaded (CLI-based OpenClaw integration)')
+    from open_webui.utils.openclaw_ws import openclaw_ws_client
+
+    async def _track_openclaw_file(session_key, tool_name, file_path, tool_result, user_id=None):
+        try:
+            filename = file_path.split('/')[-1] if file_path else None
+            if not filename:
+                return
+
+            file_type = detect_file_type(filename)
+            file_size = tool_result.get('size', 0) or len(tool_result.get('content', ''))
+            owner = user_id or 'openclaw'
+
+            async with get_async_db_context() as db:
+                existing = await FileSpace.get_files(
+                    user_id=owner,
+                    session_id=session_key,
+                    db=db,
+                )
+                if not any(f.filename == filename for f in existing):
+                    form = FileSpaceForm(
+                        session_id=session_key,
+                        conversation_title=f'OpenClaw Agent - {session_key}',
+                        filename=filename,
+                        file_path=f'openclaw://workspace/{file_path}',
+                        file_size=file_size,
+                        mime_type=None,
+                        file_type=file_type,
+                    )
+                    await FileSpace.insert(owner, form, db=db)
+                    log.info(f'Tracked OpenClaw file: {filename} (session: {session_key}, user: {owner})')
+        except Exception as e:
+            log.error(f'Error tracking OpenClaw file: {e}')
+
+    openclaw_ws_client.on_tool_event(_track_openclaw_file)
+    asyncio.create_task(openclaw_ws_client.connect())
+    log.info('OpenClaw WebSocket subscriber started (device auth enabled)')
 
 
 # --- Database Model ---
